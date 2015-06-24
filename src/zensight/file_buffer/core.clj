@@ -233,7 +233,10 @@
 
 (defn fbos-close
   [this]
-  (reset! (:closed? (.state this)) true))
+  (reset! (:closed? (.state this)) true)
+  (let [lock-obj (:lock-obj (.state this))]
+    (locking lock-obj
+      (.notifyAll lock-obj))))
 
 ;; uphold Outputstream contract
 (defn fbos-write
@@ -281,29 +284,32 @@
   ([this dst]
    (fbis-read this dst 0 (count dst)))
   ([this dst offset len]
-   (cond
-     (zero? (count dst))
-     0
+   (let [state (.state this)
+         closed-and-fully-read? (fn [state]
+                                  (let [buf-pos @(:buf-pos state)]
+                                    (and @(:closed? state)
+                                         (= (.read-pos buf-pos)
+                                            (.write-count buf-pos)))))]
+     (cond
+       (zero? (count dst))
+       0
 
-     (let [state (.state this)
-           closed? @(:closed? state)
-           buf-pos @(:buf-pos state)]
-       (and closed?
-            (= (.read-pos buf-pos)
-               (.write-count buf-pos))))
-     -1 ; EOF
+       (closed-and-fully-read? state)
+       -1 ; EOF
 
-     :else
-     (let [state (.state this)
-           buffer (:buffer state)
-           buf-pos (:buf-pos state)
-           closed? @(:closed? state)
-           lock-obj (:lock-obj state)]
-       (maybe-wait-for-bytes @buf-pos closed? lock-obj)
-       (let [cnt (read-bytes buffer @buf-pos dst offset len)]
-         (swap! buf-pos update-in [:read-pos] + cnt)
-         (free-storage buffer @buf-pos)
-         cnt)))))
+       :else
+       (let [buffer (:buffer state)
+             buf-pos (:buf-pos state)
+             closed? @(:closed? state)
+             lock-obj (:lock-obj state)]
+         (maybe-wait-for-bytes @buf-pos closed? lock-obj)
+
+         (if (closed-and-fully-read? state)
+           -1 ; EOF, writer may have closed (with no new bytes) while waiting
+           (let [cnt (read-bytes buffer @buf-pos dst offset len)]
+             (swap! buf-pos update-in [:read-pos] + cnt)
+             (free-storage buffer @buf-pos)
+             cnt)))))))
 
 (defn fbis-close [this] nil) ; no-op as file pre-deleted
 

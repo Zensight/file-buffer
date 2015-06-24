@@ -248,3 +248,26 @@
         (with-open [is (.getInputStream fb)]
           (.read is big-buf) => 6
           (.read is) => -1)))
+
+(fact "Close of writer when fully read releases reader"
+      (let [data "abcdef"
+            data-byte-cnt (count data)
+            data-bytes (.getBytes data)
+            fb (FileBuffer. 4 2)
+            os (.getOutputStream fb)
+            is (.getInputStream fb)
+            big-buf-size (+ 1 data-byte-cnt)
+            big-buf (byte-array big-buf-size)] ; spills to disk
+
+        ;; write the 'all' the data
+        (.write os data-bytes)
+
+        (let [f-v (future
+                    (with-open [stream is]
+                      ;; will read all bytes that will every be written
+                      (.read stream big-buf 0 big-buf-size) => data-byte-cnt
+                      ;; will block until the writer closes his stream, gets EOF
+                      (.read stream big-buf 0 big-buf-size)))]
+          (Thread/sleep 1000)
+          (.close os)
+          @f-v => -1)))
