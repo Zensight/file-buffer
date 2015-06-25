@@ -178,7 +178,6 @@
             (free-storage b buf-pos)
             (recur (next bufs) abs-buf-end)))))))
 
-
 (defn segmented-buffer
   "Creates a SegmentedBuffer with initial MemorySegments and final
   FileSegment"
@@ -229,11 +228,14 @@
 
 (defn fbos-isClosed
   [this]
-  (-> (.state this) :closed? deref))
+  (-> (.state this)
+      :closed?
+      deref
+      :fbos-closed?))
 
 (defn fbos-close
   [this]
-  (reset! (:closed? (.state this)) true)
+  (swap! (:closed? (.state this)) assoc-in [:fbos-closed?] true)
   (let [lock-obj (:lock-obj (.state this))]
     (locking lock-obj
       (.notifyAll lock-obj))))
@@ -287,7 +289,7 @@
    (let [state (.state this)
          closed-and-fully-read? (fn [state]
                                   (let [buf-pos @(:buf-pos state)]
-                                    (and @(:closed? state)
+                                    (and (:fbos-closed? @(:closed? state))
                                          (= (.read-pos buf-pos)
                                             (.write-count buf-pos)))))]
      (cond
@@ -300,7 +302,7 @@
        :else
        (let [buffer (:buffer state)
              buf-pos (:buf-pos state)
-             closed? @(:closed? state)
+             closed? (:fbos-closed? @(:closed? state))
              lock-obj (:lock-obj state)]
          (maybe-wait-for-bytes @buf-pos closed? lock-obj)
 
@@ -311,7 +313,9 @@
              (free-storage buffer @buf-pos)
              cnt)))))))
 
-(defn fbis-close [this] nil) ; no-op as file pre-deleted
+(defn fbis-close [this]
+  (swap! (:closed? (.state this)) assoc-in [:fbis-closed?] true))
+
 
 (defn fbis-available
   [this]
@@ -343,7 +347,8 @@
 
 (defn fb-init [threshold max-buf-size]
   (let [monitor (Object.)
-        closed? (atom false)
+        closed? (atom {:fbos-closed? false
+                       :fbis-closed? false})
         file (File/createTempFile "FileBackedBuffer" nil)
         buf-pos (atom (->BufferPosition 0 0))
         buffer (segmented-buffer file threshold max-buf-size)
@@ -380,6 +385,8 @@
 
 (defn fb-isClosed
   [this]
-  (-> (.state this)
-      :closed?
-      deref))
+  (->> (.state this)
+       :closed?
+       deref
+       vals
+       (every? true?)))
