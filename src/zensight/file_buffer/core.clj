@@ -45,7 +45,10 @@
     (.write fos src offset len)
     len)
 
-  (free-storage [this closed? buf-pos] nil))
+  (free-storage [this closed? buf-pos]
+    (when closed?
+      (.close fc)
+      (.close fos))))
 
 (defn file-segment
   [file]
@@ -75,7 +78,8 @@
       (System/arraycopy src offset @buffer (.write-count buf-pos) new-len)
       new-len))
 
-  (free-storage [this closed? buf-pos] (reset! buffer nil)))
+  (free-storage [this closed? buf-pos]
+    (reset! buffer nil)))
 
 (defn memory-segment
   [size]
@@ -167,16 +171,19 @@
         total-written)))
 
   (free-storage [this closed? buf-pos]
-    (loop [bufs buffers
-           abs-buf-end 0]
-      (when-let [b (first bufs)]
-        (let [sz (if (number? (max-size b))
-                      (max-size b)
-                      0)
-              abs-buf-end (+ abs-buf-end sz)]
-          (when (> (.read-pos buf-pos) abs-buf-end)
-            (free-storage b closed? buf-pos)
-            (recur (next bufs) abs-buf-end)))))))
+    (if closed?
+      (doseq [b buffers]
+        (free-storage b true nil))
+      (loop [bufs buffers
+             abs-buf-end 0]
+        (when-let [b (first bufs)]
+          (let [sz (if (number? (max-size b))
+                     (max-size b)
+                     0)
+                abs-buf-end (+ abs-buf-end sz)]
+            (when (> (.read-pos buf-pos) abs-buf-end)
+              (free-storage b false buf-pos)
+              (recur (next bufs) abs-buf-end))))))))
 
 (defn segmented-buffer
   "Creates a SegmentedBuffer with initial MemorySegments and final
@@ -235,10 +242,15 @@
 
 (defn fbos-close
   [this]
-  (swap! (:closed? (.state this)) assoc-in [:fbos-closed?] true)
-  (let [lock-obj (:lock-obj (.state this))]
-    (locking lock-obj
-      (.notifyAll lock-obj))))
+  (let [state (.state this)]
+    (swap! (:closed? state) assoc-in [:fbos-closed?] true)
+    ;; free all storage when both streams are closed
+    (when (every? true? (vals @(:closed? state)))
+      (free-storage (:buffer state) true nil))
+    ;; unblock any reader threads
+    (let [lock-obj (:lock-obj (.state this))]
+      (locking lock-obj
+        (.notifyAll lock-obj)))))
 
 ;; uphold Outputstream contract
 (defn fbos-write
@@ -316,7 +328,11 @@
              cnt)))))))
 
 (defn fbis-close [this]
-  (swap! (:closed? (.state this)) assoc-in [:fbis-closed?] true))
+  (let [state (.state this)]
+    (swap! (:closed? state) assoc-in [:fbis-closed?] true)
+    ;; free all storage when both streams are closed
+    (when (every? true? (vals @(:closed? state)))
+      (free-storage (:buffer state) true nil))))
 
 (defn fbis-available
   [this]
