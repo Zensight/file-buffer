@@ -15,7 +15,7 @@
   (max-size [segment] "Size or :unlimited")
   (read-bytes [buf-pos segment dst offset len] "Read into dst at offset and len")
   (write-bytes [buf-pos segment src offset len] "Write from src")
-  (free-storage [segment buf-pos] "Frees any storage resources"))
+  (free-storage [segment closed? buf-pos] "Frees any storage resources"))
 
 (defn readable-bytes
   [buf-pos max-size]
@@ -45,7 +45,10 @@
     (.write fos src offset len)
     len)
 
-  (free-storage [this buf-pos] nil))
+  (free-storage [this closed? buf-pos]
+    (when closed?
+      (.close fc)
+      (.close fos))))
 
 (defn file-segment
   [file]
@@ -75,7 +78,8 @@
       (System/arraycopy src offset @buffer (.write-count buf-pos) new-len)
       new-len))
 
-  (free-storage [this buf-pos] (reset! buffer nil)))
+  (free-storage [this closed? buf-pos]
+    (reset! buffer nil)))
 
 (defn memory-segment
   [size]
@@ -166,18 +170,20 @@
                    src-len)))
         total-written)))
 
-  (free-storage [this buf-pos]
-    (loop [bufs buffers
-           abs-buf-end 0]
-      (when-let [b (first bufs)]
-        (let [sz (if (number? (max-size b))
-                      (max-size b)
-                      0)
-              abs-buf-end (+ abs-buf-end sz)]
-          (when (> (.read-pos buf-pos) abs-buf-end)
-            (free-storage b buf-pos)
-            (recur (next bufs) abs-buf-end)))))))
-
+  (free-storage [this closed? buf-pos]
+    (if closed?
+      (doseq [b buffers]
+        (free-storage b true nil))
+      (loop [bufs buffers
+             abs-buf-end 0]
+        (when-let [b (first bufs)]
+          (let [sz (if (number? (max-size b))
+                     (max-size b)
+                     0)
+                abs-buf-end (+ abs-buf-end sz)]
+            (when (> (.read-pos buf-pos) abs-buf-end)
+              (free-storage b false buf-pos)
+              (recur (next bufs) abs-buf-end))))))))
 
 (defn segmented-buffer
   "Creates a SegmentedBuffer with initial MemorySegments and final
@@ -229,14 +235,22 @@
 
 (defn fbos-isClosed
   [this]
-  (-> (.state this) :closed? deref))
+  (-> (.state this)
+      :closed?
+      deref
+      :fbos-closed?))
 
 (defn fbos-close
   [this]
-  (reset! (:closed? (.state this)) true)
-  (let [lock-obj (:lock-obj (.state this))]
-    (locking lock-obj
-      (.notifyAll lock-obj))))
+  (let [state (.state this)]
+    (swap! (:closed? state) assoc-in [:fbos-closed?] true)
+    ;; free all storage when both streams are closed
+    (when (every? true? (vals @(:closed? state)))
+      (free-storage (:buffer state) true nil))
+    ;; unblock any reader threads
+    (let [lock-obj (:lock-obj (.state this))]
+      (locking lock-obj
+        (.notifyAll lock-obj)))))
 
 ;; uphold Outputstream contract
 (defn fbos-write
@@ -287,7 +301,7 @@
    (let [state (.state this)
          closed-and-fully-read? (fn [state]
                                   (let [buf-pos @(:buf-pos state)]
-                                    (and @(:closed? state)
+                                    (and (:fbos-closed? @(:closed? state))
                                          (= (.read-pos buf-pos)
                                             (.write-count buf-pos)))))]
      (cond
@@ -301,17 +315,24 @@
        (let [buffer (:buffer state)
              buf-pos (:buf-pos state)
              closed? @(:closed? state)
+             fbos-closed? (:fbos-closed? closed?)
              lock-obj (:lock-obj state)]
-         (maybe-wait-for-bytes @buf-pos closed? lock-obj)
+         (maybe-wait-for-bytes @buf-pos fbos-closed? lock-obj)
 
          (if (closed-and-fully-read? state)
            -1 ; EOF, writer may have closed (with no new bytes) while waiting
-           (let [cnt (read-bytes buffer @buf-pos dst offset len)]
+           (let [cnt (read-bytes buffer @buf-pos dst offset len)
+                 both-closed? (every? true? (vals closed?))]
              (swap! buf-pos update-in [:read-pos] + cnt)
-             (free-storage buffer @buf-pos)
+             (free-storage buffer both-closed? @buf-pos)
              cnt)))))))
 
-(defn fbis-close [this] nil) ; no-op as file pre-deleted
+(defn fbis-close [this]
+  (let [state (.state this)]
+    (swap! (:closed? state) assoc-in [:fbis-closed?] true)
+    ;; free all storage when both streams are closed
+    (when (every? true? (vals @(:closed? state)))
+      (free-storage (:buffer state) true nil))))
 
 (defn fbis-available
   [this]
@@ -343,7 +364,8 @@
 
 (defn fb-init [threshold max-buf-size]
   (let [monitor (Object.)
-        closed? (atom false)
+        closed? (atom {:fbos-closed? false
+                       :fbis-closed? false})
         file (File/createTempFile "FileBackedBuffer" nil)
         buf-pos (atom (->BufferPosition 0 0))
         buffer (segmented-buffer file threshold max-buf-size)
@@ -380,6 +402,8 @@
 
 (defn fb-isClosed
   [this]
-  (-> (.state this)
-      :closed?
-      deref))
+  (->> (.state this)
+       :closed?
+       deref
+       vals
+       (every? true?)))

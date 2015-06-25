@@ -39,7 +39,8 @@
 (fact "Can read and write a single byte"
       (let [fb (FileBuffer. 1024 256)
             os (.getOutputStream fb)]
-        (with-open [is (.getInputStream fb)]
+        (with-open [is (.getInputStream fb)
+                    os os]
           (.write os 65) ; "A"
           (.read is) => 65)))
 
@@ -47,7 +48,8 @@
       (let [fb (FileBuffer. 1024 256)
             os (.getOutputStream fb)
             buf (byte-array 3)]
-        (with-open [is (.getInputStream fb)]
+        (with-open [is (.getInputStream fb)
+                    os os]
           (.write os (.getBytes "abc"))
           (.read is buf) => 3
           (aget buf 0) => 97
@@ -58,7 +60,8 @@
       (let [fb (FileBuffer. 1024 256)
             os (.getOutputStream fb)
             buf (byte-array 10)]
-        (with-open [is (.getInputStream fb)]
+        (with-open [is (.getInputStream fb)
+                    os os]
           (aset-byte buf 0 65)
           (aset-byte buf 1 65)
           (.write os (.getBytes "abc"))
@@ -70,7 +73,8 @@
 (fact "Reading blocks waiting for writing"
       (let [fb (FileBuffer. 1024 256)
             os (.getOutputStream fb)]
-        (with-open [is (.getInputStream fb)]
+        (with-open [is (.getInputStream fb)
+                    os os]
           (future (Thread/sleep 250)
                   (.write os 65))
           (.read is) => 65)))
@@ -82,13 +86,15 @@
         (.write os 65)
         (.read is) => 65
         (.close os)
-        (.read is) => -1))
+        (.read is) => -1
+        (.close is)))
 
 (fact "Reads can span memory segments"
       (let [fb (FileBuffer. 26 13)
             os (.getOutputStream fb)
             buf (byte-array 26)]
-        (with-open [is (.getInputStream fb)]
+        (with-open [is (.getInputStream fb)
+                    os os]
           (.write os (.getBytes "abcdefghijklmnopqrstuvwxy"))
           (.read is buf) => 25
           (.substring (String. buf) 0 25) => "abcdefghijklmnopqrstuvwxy")))
@@ -97,7 +103,8 @@
       (let [fb (FileBuffer. 13 13)
             os (.getOutputStream fb)
             buf (byte-array 26)]
-        (with-open [is (.getInputStream fb)]
+        (with-open [is (.getInputStream fb)
+                    os os]
           (.write os (.getBytes "abcdefghijklmnopqrstuvwxy")) ; 25 chars
           (.read is buf) => 25
           (.substring (String. buf) 0 25) => "abcdefghijklmnopqrstuvwxy")))
