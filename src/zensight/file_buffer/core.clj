@@ -15,7 +15,7 @@
   (max-size [segment] "Size or :unlimited")
   (read-bytes [buf-pos segment dst offset len] "Read into dst at offset and len")
   (write-bytes [buf-pos segment src offset len] "Write from src")
-  (free-storage [segment buf-pos] "Frees any storage resources"))
+  (free-storage [segment closed? buf-pos] "Frees any storage resources"))
 
 (defn readable-bytes
   [buf-pos max-size]
@@ -45,7 +45,7 @@
     (.write fos src offset len)
     len)
 
-  (free-storage [this buf-pos] nil))
+  (free-storage [this closed? buf-pos] nil))
 
 (defn file-segment
   [file]
@@ -75,7 +75,7 @@
       (System/arraycopy src offset @buffer (.write-count buf-pos) new-len)
       new-len))
 
-  (free-storage [this buf-pos] (reset! buffer nil)))
+  (free-storage [this closed? buf-pos] (reset! buffer nil)))
 
 (defn memory-segment
   [size]
@@ -166,7 +166,7 @@
                    src-len)))
         total-written)))
 
-  (free-storage [this buf-pos]
+  (free-storage [this closed? buf-pos]
     (loop [bufs buffers
            abs-buf-end 0]
       (when-let [b (first bufs)]
@@ -175,7 +175,7 @@
                       0)
               abs-buf-end (+ abs-buf-end sz)]
           (when (> (.read-pos buf-pos) abs-buf-end)
-            (free-storage b buf-pos)
+            (free-storage b closed? buf-pos)
             (recur (next bufs) abs-buf-end)))))))
 
 (defn segmented-buffer
@@ -302,20 +302,21 @@
        :else
        (let [buffer (:buffer state)
              buf-pos (:buf-pos state)
-             closed? (:fbos-closed? @(:closed? state))
+             closed? @(:closed? state)
+             fbos-closed? (:fbos-closed? closed?)
              lock-obj (:lock-obj state)]
-         (maybe-wait-for-bytes @buf-pos closed? lock-obj)
+         (maybe-wait-for-bytes @buf-pos fbos-closed? lock-obj)
 
          (if (closed-and-fully-read? state)
            -1 ; EOF, writer may have closed (with no new bytes) while waiting
-           (let [cnt (read-bytes buffer @buf-pos dst offset len)]
+           (let [cnt (read-bytes buffer @buf-pos dst offset len)
+                 both-closed? (every? true? (vals closed?))]
              (swap! buf-pos update-in [:read-pos] + cnt)
-             (free-storage buffer @buf-pos)
+             (free-storage buffer both-closed? @buf-pos)
              cnt)))))))
 
 (defn fbis-close [this]
   (swap! (:closed? (.state this)) assoc-in [:fbis-closed?] true))
-
 
 (defn fbis-available
   [this]
