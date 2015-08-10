@@ -205,10 +205,10 @@
 
 (defn maybe-wait-for-bytes
   [buf-pos closed? lock-obj]
-  (when (and (not closed?)
-             (= (.read-pos buf-pos)
-                (.write-count buf-pos)))
-    (locking lock-obj
+  (locking lock-obj
+    (when (and (not (:fbos-closed? @closed?))
+               (= (.read-pos buf-pos)
+                  (.write-count buf-pos)))
       (.wait lock-obj))))
 
 ;; Class FBOutputStream ------------------------------------------------
@@ -242,15 +242,17 @@
 
 (defn fbos-close
   [this]
-  (let [state (.state this)]
-    (swap! (:closed? state) assoc-in [:fbos-closed?] true)
+  (let [state (.state this)
+        lock-obj (:lock-obj state)]
+
+    (locking lock-obj
+      (swap! (:closed? state) assoc-in [:fbos-closed?] true)
+      ;; unblock any reader threads
+      (.notifyAll lock-obj))
+
     ;; free all storage when both streams are closed
-    (when (every? true? (vals @(:closed? state)))
-      (free-storage (:buffer state) true nil))
-    ;; unblock any reader threads
-    (let [lock-obj (:lock-obj (.state this))]
-      (locking lock-obj
-        (.notifyAll lock-obj)))))
+      (when (every? true? (vals @(:closed? state)))
+        (free-storage (:buffer state) true nil))))
 
 ;; uphold Outputstream contract
 (defn fbos-write
@@ -314,15 +316,13 @@
        :else
        (let [buffer (:buffer state)
              buf-pos (:buf-pos state)
-             closed? @(:closed? state)
-             fbos-closed? (:fbos-closed? closed?)
              lock-obj (:lock-obj state)]
-         (maybe-wait-for-bytes @buf-pos fbos-closed? lock-obj)
+         (maybe-wait-for-bytes @buf-pos (:closed? state) lock-obj)
 
          (if (closed-and-fully-read? state)
            -1 ; EOF, writer may have closed (with no new bytes) while waiting
            (let [cnt (read-bytes buffer @buf-pos dst offset len)
-                 both-closed? (every? true? (vals closed?))]
+                 both-closed? (every? true? (vals @(:closed? state)))]
              (swap! buf-pos update-in [:read-pos] + cnt)
              (free-storage buffer both-closed? @buf-pos)
              cnt)))))))
@@ -363,14 +363,14 @@
  :prefix fb-)
 
 (defn fb-init [threshold max-buf-size]
-  (let [monitor (Object.)
+  (let [lock-obj (Object.)
         closed? (atom {:fbos-closed? false
                        :fbis-closed? false})
         file (File/createTempFile "FileBackedBuffer" nil)
         buf-pos (atom (->BufferPosition 0 0))
         buffer (segmented-buffer file threshold max-buf-size)
-        os (zensight.file-buffer.core.FBOutputStream. monitor buffer buf-pos closed?)
-        is (zensight.file-buffer.core.FBInputStream. monitor buffer buf-pos closed?)]
+        os (zensight.file-buffer.core.FBOutputStream. lock-obj buffer buf-pos closed?)
+        is (zensight.file-buffer.core.FBInputStream. lock-obj buffer buf-pos closed?)]
   [[] ; args to super class
    {:threshold threshold
     :file file
@@ -378,8 +378,7 @@
     :buf-pos buf-pos
     :os os
     :is is
-    :closed? closed?
-    :monitor monitor}]))
+    :closed? closed?}]))
 
 (defn fb-getThreshold
   [this]
