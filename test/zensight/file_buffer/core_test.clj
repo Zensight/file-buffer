@@ -2,7 +2,7 @@
   (:require [zensight.file-buffer.core :as fb]
             [clojure.stacktrace :refer [print-stack-trace]])
   (:import [zensight.file-buffer.core FileBuffer FBOutputStream FBInputStream]
-           [java.io File])
+           [java.io File IOException])
   (:use [midje.sweet]))
 
 (facts "Relative positions are usable for read and write"
@@ -278,3 +278,9 @@
           (Thread/sleep 1000)
           (.close os)
           @f-v => -1)))
+
+(fact "Writes to a closed stream get an IOException"
+  (let [fb (FileBuffer. 2 1)
+        os (.getOutputStream fb)]
+    (.close os)
+    (.write os (.getBytes "a")) => (throws IOException)))

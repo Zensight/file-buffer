@@ -263,15 +263,17 @@
        (fbos-write this src 0 1))
      (fbos-write this arg1 0 (count arg1)))) ; write an array of bytes
   ([this src offset len]
-   (let [state (.state this)
-         buffer (:buffer state)
-         buf-pos (:buf-pos state)
-         lock-obj (:lock-obj state)
-         cnt (write-bytes buffer @buf-pos src offset len)]
-     (swap! buf-pos update-in [:write-count] + cnt)
-     (locking lock-obj
-       (.notifyAll lock-obj)))
-   nil))
+   (let [state (.state this)]
+     (if (:fbos-closed? @(:closed? state))
+       (throw (IOException. "stream closed"))
+       (let [buffer (:buffer state)
+             buf-pos (:buf-pos state)
+             lock-obj (:lock-obj state)
+             cnt (write-bytes buffer @buf-pos src offset len)]
+         (swap! buf-pos update-in [:write-count] + cnt)
+         (locking lock-obj
+           (.notifyAll lock-obj))))
+     nil)))
 
 ;; Class FBInputStream -------------------------------------------------
 (gen-class
@@ -371,14 +373,14 @@
         buffer (segmented-buffer file threshold max-buf-size)
         os (zensight.file-buffer.core.FBOutputStream. lock-obj buffer buf-pos closed?)
         is (zensight.file-buffer.core.FBInputStream. lock-obj buffer buf-pos closed?)]
-  [[] ; args to super class
-   {:threshold threshold
-    :file file
-    :buffer buffer
-    :buf-pos buf-pos
-    :os os
-    :is is
-    :closed? closed?}]))
+    [[] ; args to super class
+     {:threshold threshold
+      :file file
+      :buffer buffer
+      :buf-pos buf-pos
+      :os os
+      :is is
+      :closed? closed?}]))
 
 (defn fb-getThreshold
   [this]
