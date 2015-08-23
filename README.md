@@ -2,6 +2,7 @@
 
 [![Clojars][clojars-img]][clojars-url]
 [![Build Status][travis-image]][travis-url]
+[![MIT License][license-image]][license]
 
 ## Overview
 
@@ -38,6 +39,7 @@ Copyright © 2015 Zensight, Inc.
 Distributed under the MIT License. See [LICENSE][] for more details.
 
 [license]: LICENSE
+[license-image]: http://img.shields.io/badge/license-MIT-blue.svg?style=flat-square
 [clojars-url]: https://clojars.org/file-buffer
 [clojars-img]: https://img.shields.io/clojars/v/file-buffer.svg?style=flat-square
 [travis-url]: http://travis-ci.org/zensight/file-buffer
