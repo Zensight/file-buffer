@@ -42,5 +42,5 @@ Distributed under the MIT License. See [LICENSE][] for more details.
 [license-image]: http://img.shields.io/badge/license-MIT-blue.svg?style=flat-square
 [clojars-url]: https://clojars.org/co.zensight/file-buffer
 [clojars-img]: https://img.shields.io/clojars/v/co.zensight/file-buffer.svg?style=flat-square
-[travis-url]: http://travis-ci.org/zensight/file-buffer
-[travis-image]: http://img.shields.io/travis/zensight/file-buffer/develop.svg?style=flat-square
+[travis-url]: http://travis-ci.org/Zensight/file-buffer
+[travis-image]: http://img.shields.io/travis/Zensight/file-buffer/develop.svg?style=flat-square
