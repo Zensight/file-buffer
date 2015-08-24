@@ -1,6 +1,12 @@
-# Overview
+# File Buffer
 
-This code implements class FileBuffer that can be written to with a java.io.OutputStream and read via a java.io.InputStream. Writes go into the tail of the buffer and reads take place at the head. The implementation ensures that reading doesn't overtake writing which preserves the blocking semantics of java.io.InputStream.
+[![Clojars][clojars-img]][clojars-url]
+[![Build Status][travis-image]][travis-url]
+[![MIT License][license-image]][license]
+
+## Overview
+
+This package implements class FileBuffer that can be written to with a java.io.OutputStream and read via a java.io.InputStream. Writes go into the tail of the buffer and reads take place at the head. The implementation ensures that reading doesn't overtake writing which preserves the blocking semantics of java.io.InputStream.
 
 ```
                          +--------------+
@@ -22,8 +28,19 @@ FileBuffer was meant to allow concurrently downloading a large amount of data an
 
 The concurrency model of this code assumes a single reader and a single writer. However, the read and write can be on separate threads, of course.
 
+## Usage
+
+Todo: a basic example
+
 ## License
 
 Copyright © 2015 Zensight, Inc.
 
-Distributed under the MIT License.
+Distributed under the MIT License. See [LICENSE][] for more details.
+
+[license]: LICENSE
+[license-image]: http://img.shields.io/badge/license-MIT-blue.svg?style=flat-square
+[clojars-url]: https://clojars.org/co.zensight/file-buffer
+[clojars-img]: https://img.shields.io/clojars/v/co.zensight/file-buffer.svg?style=flat-square
+[travis-url]: http://travis-ci.org/zensight/file-buffer
+[travis-image]: http://img.shields.io/travis/zensight/file-buffer/develop.svg?style=flat-square
